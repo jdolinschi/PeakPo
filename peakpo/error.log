@@ -1,8 +1,12 @@
 --------------------------------------------------------------------------------
-2022-06-14, 21:30:13
+2023-02-23, 10:40:34
 --------------------------------------------------------------------------------
-<class 'FileNotFoundError'>: 
-[Errno 2] No such file or directory: 'MgFe_0009-param'
+<class 'AttributeError'>: 
+'MplCanvas' object has no attribute '_dpi_ratio'
 --------------------------------------------------------------------------------
-  File "/Users/DanShim/Dropbox (ASU)/Python/PeakPo/PeakPo-7.7.35/peakpo/control/sessioncontroller.py", line 454, in zip_ppss
-    for file in os.listdir(folder_name):
+  File "E:\BGI-Research\Software\PeakPo-Fork\peakpo\view\mplwidget.py", line 85, in paintEvent
+    self._draw_rect_callback(painter)
+  File "E:\BGI-Research\Software\PeakPo-Fork\peakpo\view\mplwidget.py", line 29, in _draw_rect_callback
+    painter.drawRect(*(pt / self._dpi_ratio for pt in rect))
+  File "E:\BGI-Research\Software\PeakPo-Fork\peakpo\view\mplwidget.py", line 29, in <genexpr>
+    painter.drawRect(*(pt / self._dpi_ratio for pt in rect))

@@ -2,6 +2,7 @@ import os
 import glob
 import numpy as np
 from matplotlib.backend_bases import key_press_handler
+from matplotlib.backend_bases import _Mode
 from PyQt5 import QtWidgets
 from PyQt5 import QtCore
 import gc
@@ -17,7 +18,7 @@ from .jcpdscontroller import JcpdsController
 from .ucfitcontroller import UcfitController
 from .waterfalltablecontroller import WaterfallTableController
 from .jcpdstablecontroller import JcpdsTableController
-#from .ucfittablecontroller import UcfitTableController
+# from .ucfittablecontroller import UcfitTableController
 from .sessioncontroller import SessionController
 from .peakfitcontroller import PeakFitController
 from .peakfittablecontroller import PeakfitTableController
@@ -29,7 +30,9 @@ from utils import dialog_savefile, writechi, extract_extension, \
 # retro compatibility
 from ds_jcpds import UnitCell
 from ds_powdiff import get_DataSection
-#from utils import readchi, make_filename, writechi
+
+
+# from utils import readchi, make_filename, writechi
 
 
 class MainController(object):
@@ -49,7 +52,7 @@ class MainController(object):
         self.jcpds_ctrl = JcpdsController(self.model, self.widget)
         self.waterfalltable_ctrl = \
             WaterfallTableController(self.model, self.widget)
-        #self.ucfittable_ctrl = UcfitTableController(self.model, self.widget)
+        # self.ucfittable_ctrl = UcfitTableController(self.model, self.widget)
         self.jcpdstable_ctrl = JcpdsTableController(self.model, self.widget)
         self.session_ctrl = SessionController(self.model, self.widget)
         self.peakfit_ctrl = PeakFitController(self.model, self.widget)
@@ -127,8 +130,8 @@ class MainController(object):
             self.apply_changes_to_graph)
         # navigation toolbar modification.  Do not move the followings to
         # other controller files.
-        #self.widget.pushButton_toPkFt.clicked.connect(self.to_PkFt)
-        #self.widget.pushButton_fromPkFt.clicked.connect(self.from_PkFt)
+        # self.widget.pushButton_toPkFt.clicked.connect(self.to_PkFt)
+        # self.widget.pushButton_fromPkFt.clicked.connect(self.from_PkFt)
         self.widget.checkBox_NightView.clicked.connect(self.set_nightday_view)
         self.widget.pushButton_S_Zoom.clicked.connect(self.plot_new_graph)
         self.widget.checkBox_AutoY.clicked.connect(self.apply_changes_to_graph)
@@ -345,7 +348,7 @@ class MainController(object):
                 self.widget.spinBox_BGParam2.value())
         preheader_line2 = '\n'
         writechi(filen_chi, x, y, preheader=preheader_line0 +
-                 preheader_line1 + preheader_line2)
+                                            preheader_line1 + preheader_line2)
 
     def write_setting(self):
         """
@@ -356,7 +359,6 @@ class MainController(object):
         # print('write:' + self.model.chi_path)
         self.settings.setValue('chi_path', self.model.chi_path)
         self.settings.setValue('jcpds_path', self.model.jcpds_path)
-        
 
     def read_setting(self):
         """
@@ -378,9 +380,9 @@ class MainController(object):
 
     def on_key_press(self, event):
         if event.key == 'i':
-            if self.widget.mpl.ntb._active == 'PAN':
+            if self.widget.mpl.ntb.mode == _Mode.PAN:
                 self.widget.mpl.ntb.pan()
-            if self.widget.mpl.ntb._active == 'ZOOM':
+            if self.widget.mpl.ntb.mode == _Mode.ZOOM:
                 self.widget.mpl.ntb.zoom()
         elif event.key == 's':
             self.session_ctrl.save_dpp_ppss()
@@ -397,6 +399,7 @@ class MainController(object):
         else:
             key_press_handler(event, self.widget.mpl.canvas,
                               self.widget.mpl.ntb)
+
     """
     def to_PkFt(self):
         # listen
@@ -425,12 +428,13 @@ class MainController(object):
         self.plot_ctrl.update()
 
     def deliver_mouse_signal(self, event):
-        if self.widget.mpl.ntb._active is not None:
+        if self.widget.mpl.ntb.mode is not _Mode.NONE:
             return
         if (event.xdata is None) or (event.ydata is None):
             return
         if (event.button != 1) and (event.button != 3):
             return
+        mouse_button = None
         if event.button == 1:
             mouse_button = 'left'
         elif event.button == 3:
@@ -488,10 +492,10 @@ class MainController(object):
         x_click = float(xdata)
         y_click = float(ydata)
         x_click_dsp = self.widget.doubleSpinBox_SetWavelength.value() / 2. / \
-            np.sin(np.radians(x_click / 2.))
+                      np.sin(np.radians(x_click / 2.))
         clicked_position = \
-            "Clicked position: {0:.4f}, {1:.1f}, \n d-sp = {2:.4f} \u212B".\
-            format(x_click, y_click, x_click_dsp)
+            "Clicked position: {0:.4f}, {1:.1f}, \n d-sp = {2:.4f} \u212B". \
+                format(x_click, y_click, x_click_dsp)
         if (not self.model.jcpds_exist()) and (not self.model.ucfit_exist()):
             QtWidgets.QMessageBox.warning(self.widget, "Information",
                                           clicked_position)
@@ -539,9 +543,9 @@ class MainController(object):
         temp_dir = get_temp_dir(self.model.get_base_ptn_filename())
         self.model.base_ptn.write_temporary_bgfiles(temp_dir=temp_dir)
         if self.model.waterfall_exist():
-            print(str(datetime.datetime.now())[:-7], 
-                ": BGfit and BGsub for waterfall patterns even if they are displayed.\n",
-                "Yes this is a bit of waste.  Future fix needed.")
+            print(str(datetime.datetime.now())[:-7],
+                  ": BGfit and BGsub for waterfall patterns even if they are displayed.\n",
+                  "Yes this is a bit of waste.  Future fix needed.")
             for pattern in self.model.waterfall_ptn:
                 pattern.subtract_bg(bg_roi, bg_params, yshift=0)
         self.plot_new_graph()
@@ -650,7 +654,7 @@ class MainController(object):
                 name_min = names_u[idx_min]
         line1 = '2\u03B8 = {0:.4f} \u00B0, d-sp = {1:.4f} \u212B'.format(
             float(tth_min), float(dsp_min))
-        line2 = 'intensity = {0: .0f}, hkl = {1: .0f} {2: .0f} {3: .0f}'.\
+        line2 = 'intensity = {0: .0f}, hkl = {1: .0f} {2: .0f} {3: .0f}'. \
             format(int(int_min), int(h_min), int(k_min), int(l_min))
         textoutput = name_min + '\n' + line1 + '\n' + line2
         return textoutput
@@ -823,7 +827,7 @@ class MainController(object):
             # pre-existing dpp
             # question if overwrite or not
             if self.widget.checkBox_AutoGenDPP.isChecked() and \
-                (not self.widget.checkBox_AutogenMissing.isChecked()):
+                    (not self.widget.checkBox_AutogenMissing.isChecked()):
                 reply = QtWidgets.QMessageBox.question(
                     self.widget, 'Message',
                     "The next pattern already has a dpp.\n" +
@@ -844,7 +848,7 @@ class MainController(object):
                     success = self.session_ctrl._load_dpp(new_filename_dpp)
                     if success:
                         if self.model.exist_in_waterfall(
-                            self.model.base_ptn.fname):
+                                self.model.base_ptn.fname):
                             self.widget.pushButton_AddBasePtn.setChecked(True)
                         else:
                             self.widget.pushButton_AddBasePtn.setChecked(False)
@@ -861,7 +865,7 @@ class MainController(object):
                 success = self.session_ctrl._load_dpp(new_filename_dpp)
                 if success:
                     if self.model.exist_in_waterfall(
-                        self.model.base_ptn.fname):
+                            self.model.base_ptn.fname):
                         self.widget.pushButton_AddBasePtn.setChecked(True)
                     else:
                         self.widget.pushButton_AddBasePtn.setChecked(False)

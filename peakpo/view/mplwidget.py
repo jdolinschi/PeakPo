@@ -3,11 +3,10 @@ import sys
 import numpy as np
 from PyQt5 import QtCore, QtGui
 from PyQt5 import QtWidgets
-from matplotlib.backends.backend_qt5agg \
-    import FigureCanvasQTAgg, FigureCanvasQT  # as FigureCanvas
-#    import FigureCanvasQTAgg  # as FigureCanvas
-from matplotlib.backends.backend_qt5agg \
-    import NavigationToolbar2QT as NavigationToolbar
+import ctypes
+from matplotlib.backends.qt_compat import QT_API, _enum
+from matplotlib.backends.backend_qt import FigureCanvasQT, NavigationToolbar2QT as NavigationToolbar
+from matplotlib.backends.backend_agg import FigureCanvasAgg
 from matplotlib.figure import Figure
 from matplotlib.gridspec import GridSpec
 import matplotlib.style as mplstyle
@@ -22,11 +21,29 @@ class FigureCanvasQT_modified(FigureCanvasQT):
         # Draw the zoom rectangle to the QPainter.  _draw_rect_callback needs
         # to be called at the end of paintEvent.
         if rect is not None:
+            x0, y0, w, h = [int(pt / self.device_pixel_ratio) for pt in rect]
+            x1 = x0 + w
+            y1 = y0 + h
             def _draw_rect_callback(painter):
-                pen = QtGui.QPen(QtCore.Qt.red, 5 / self._dpi_ratio,
-                                 QtCore.Qt.DotLine)
-                painter.setPen(pen)
-                painter.drawRect(*(pt / self._dpi_ratio for pt in rect))
+                pen = QtGui.QPen(
+                    QtGui.QColor("red"),
+                    3 / self.device_pixel_ratio
+                )
+
+                pen.setDashPattern([3, 3])
+                for color, offset in [
+                        (QtGui.QColor("red"), 0),
+                        (QtGui.QColor(0,0,0,0), 3),
+                ]:
+                    pen.setDashOffset(offset)
+                    pen.setColor(color)
+                    painter.setPen(pen)
+                    # Draw the lines from x0, y0 towards x1, y1 so that the
+                    # dashes don't "jump" when moving the zoom box.
+                    painter.drawLine(x0, y0, x0, y1)
+                    painter.drawLine(x0, y0, x1, y0)
+                    painter.drawLine(x0, y1, x1, y1)
+                    painter.drawLine(x1, y0, x1, y1)
         else:
             def _draw_rect_callback(painter):
                 return
@@ -34,79 +51,66 @@ class FigureCanvasQT_modified(FigureCanvasQT):
         self.update()
 
 
-class FigureCanvasQTAgg_modified(FigureCanvasQTAgg, FigureCanvasQT_modified):
-    def __init__(self, figure):
-        super(FigureCanvasQTAgg, self).__init__(figure=figure)
-        self._bbox_queue = []
+class FigureCanvasQTAgg_modified(FigureCanvasAgg, FigureCanvasQT_modified):
 
-    @property
-    #@cbook.deprecated("2.1")
-    def blitbox(self):
-        return self._bbox_queue
-
-    def paintEvent(self, e):
-        """Copy the image from the Agg canvas to the qt.drawable.
-
+    def paintEvent(self, event):
+        """
+        Copy the image from the Agg canvas to the qt.drawable.
         In Qt, all drawing should be done inside of here when a widget is
         shown onscreen.
         """
-        if self._update_dpi():
-            # The dpi update triggered its own paintEvent.
-            return
         self._draw_idle()  # Only does something if a draw is pending.
 
-        # if the canvas does not have a renderer, then give up and wait for
-        # FigureCanvasAgg.draw(self) to be called
+        # If the canvas does not have a renderer, then give up and wait for
+        # FigureCanvasAgg.draw(self) to be called.
         if not hasattr(self, 'renderer'):
             return
 
         painter = QtGui.QPainter(self)
+        try:
+            # See documentation of QRect: bottom() and right() are off
+            # by 1, so use left() + width() and top() + height().
+            rect = event.rect()
+            # scale rect dimensions using the screen dpi ratio to get
+            # correct values for the Figure coordinates (rather than
+            # QT5's coords)
+            width = rect.width() * self.device_pixel_ratio
+            height = rect.height() * self.device_pixel_ratio
+            left, top = self.mouseEventCoords(rect.topLeft())
+            # shift the "top" by the height of the image to get the
+            # correct corner for our coordinate system
+            bottom = top - height
+            # same with the right side of the image
+            right = left + width
+            # create a buffer using the image bounding box
+            bbox = Bbox([[left, bottom], [right, top]])
+            buf = memoryview(self.copy_from_bbox(bbox))
 
-        if self._bbox_queue:
-            bbox_queue = self._bbox_queue
-        else:
-            painter.eraseRect(self.rect())
-            bbox_queue = [
-                Bbox([[0, 0], [self.renderer.width, self.renderer.height]])]
-        self._bbox_queue = []
-        for bbox in bbox_queue:
-            l, b, r, t = map(int, bbox.extents)
-            w = r - l
-            h = t - b
-            reg = self.copy_from_bbox(bbox)
-            buf = reg.to_string_argb()
-            qimage = QtGui.QImage(buf, w, h, QtGui.QImage.Format_ARGB32)
-            # Adjust the buf reference count to work around a memory leak bug
-            # in QImage under PySide on Python 3.
-            if hasattr(qimage, 'setDevicePixelRatio'):
-                # Not available on Qt4 or some older Qt5.
-                qimage.setDevicePixelRatio(self._dpi_ratio)
-            origin = QtCore.QPoint(l, self.renderer.height - t)
-            painter.drawImage(origin / self._dpi_ratio, qimage)
+            if QT_API == "PyQt6":
+                from PyQt6 import sip
+                ptr = int(sip.voidptr(buf))
+            else:
+                ptr = buf
 
-        self._draw_rect_callback(painter)
+            painter.eraseRect(rect)  # clear the widget canvas
+            qimage = QtGui.QImage(ptr, buf.shape[1], buf.shape[0],
+                                  _enum("QtGui.QImage.Format").Format_RGBA8888)
+            qimage.setDevicePixelRatio(self.device_pixel_ratio)
+            # set origin using original QT coordinates
+            origin = QtCore.QPoint(rect.left(), rect.top())
+            painter.drawImage(origin, qimage)
+            # Adjust the buf reference count to work around a memory
+            # leak bug in QImage under PySide.
+            if QT_API == "PySide2" and QtCore.__version_info__ < (5, 12):
+                ctypes.c_long.from_address(id(buf)).value = 1
 
-        painter.end()
-
-    def blit(self, bbox=None):
-        """Blit the region in bbox.
-        """
-        # If bbox is None, blit the entire canvas. Otherwise
-        # blit only the area defined by the bbox.
-        if bbox is None and self.figure:
-            bbox = self.figure.bbox
-
-        self._bbox_queue.append(bbox)
-
-        # repaint uses logical pixels, not physical pixels like the renderer.
-        l, b, w, h = [pt / self._dpi_ratio for pt in bbox.bounds]
-        t = b + h
-        self.repaint(l, self.renderer.height / self._dpi_ratio - t, w, h)
+            self._draw_rect_callback(painter)
+        finally:
+            painter.end()
 
     def print_figure(self, *args, **kwargs):
-        super(FigureCanvasQTAgg, self).print_figure(*args, **kwargs)
+        super().print_figure(*args, **kwargs)
         self.draw()
-
 
 class MplCanvas(FigureCanvasQTAgg_modified):
     """Class to represent the FigureCanvas widget"""
